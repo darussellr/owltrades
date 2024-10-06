@@ -8,7 +8,7 @@ import pandas as pd
 FEATURE_LIST = [
     'SMA50', 'SMA200', 'EMA50', 'EMA200', 'RSI', 'MACD', 'Signal Line',
     'Middle Band', 'Upper Band', 'Lower Band', 'ATR', 'Momentum',
-    'Stochastic Oscillator', 'Williams %R', 'OBV', 'ROC', 'Volatility'
+    'Stochastic Oscillator', 'Williams %R', 'OBV', 'ROC', 'Volatility', 'Bullish_Bearish'
 ]
 
 # Function to fetch stock data using Yahoo Finance
@@ -16,8 +16,29 @@ def fetch_data(symbol, start_date, end_date):
     data = yf.download(symbol, start=start_date, end=end_date, interval='1d')
     return data
 
+# Function to calculate bullish or bearish based on the previous month
+def calculate_bullish_bearish(data, symbol, start_date):
+    # Fetch data from the previous month before the start date
+    prev_month_start = start_date - pd.DateOffset(months=1)
+    prev_month_end = start_date - pd.DateOffset(days=1)
+    
+    # Get data for the previous month
+    prev_data = fetch_data(symbol, prev_month_start, prev_month_end)
+    
+    if not prev_data.empty:
+        # Calculate the average closing price of the previous month
+        prev_month_avg_close = prev_data['Close'].mean()
+        
+        # Get the closing price at the start of the selected period
+        current_start_price = data['Close'].iloc[0]
+        
+        # Classify the period as bullish (1) if the current price is higher than the previous month’s average, bearish (-1) otherwise
+        data['Bullish_Bearish'] = 1 if current_start_price > prev_month_avg_close else -1
+    else:
+        data['Bullish_Bearish'] = 0  # If no previous data is found, mark as neutral (could also handle this differently if needed)
+
 # Function to calculate all features
-def prepare_all_features(data):
+def prepare_all_features(data, symbol, start_date):
     data['SMA50'] = data['Close'].rolling(window=50).mean()
     data['SMA200'] = data['Close'].rolling(window=200).mean()
     data['EMA50'] = data['Close'].ewm(span=50, adjust=False).mean()
@@ -50,6 +71,9 @@ def prepare_all_features(data):
     data['OBV'] = data['Volume'] * data['Direction'].cumsum()
     data['ROC'] = ((data['Close'] - data['Close'].shift(12)) / data['Close'].shift(12)) * 100
     data['Volatility'] = data['Close'].rolling(window=21).std()
+    
+    # Add Bullish/Bearish feature
+    calculate_bullish_bearish(data, symbol, start_date)
 
 # Function to train a model with selected features using XGBoost
 def train_xgboost_model(data, selected_features):
@@ -86,7 +110,7 @@ if st.button('Train Model'):
             st.error("No data found for the selected time frame and symbol.")
         else:
             # Prepare features
-            prepare_all_features(data)
+            prepare_all_features(data, symbol, start_date)
             
             # Train XGBoost model with selected features
             model = train_xgboost_model(data, selected_features)
