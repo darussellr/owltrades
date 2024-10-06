@@ -1,3 +1,5 @@
+/* StockAnalysisTool.css */
+
 body {
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   background-color: #f4f7fa;
@@ -38,117 +40,24 @@ body {
   gap: 20px;
 }
 
-.profit-comparison-container, .stats-container, .chart-container {
+.chart-container {
   background-color: white;
   border-radius: 8px;
   padding: 20px;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
-.profit-comparison-container h2, .chart-container h2 {
+.chart-container h2 {
   margin-top: 0;
   color: #333;
   font-size: 24px;
   margin-bottom: 20px;
 }
 
-.profit-cards {
+.chart-controls {
   display: flex;
-  justify-content: space-between;
-  gap: 20px;
+  justify-content: flex-start;
   margin-bottom: 20px;
-}
-
-.card {
-  flex: 1;
-  padding: 15px;
-  border-radius: 8px;
-  text-align: center;
-}
-
-.ai-profit {
-  background-color: #e8f5e9;
-}
-
-.diamond-hands-profit {
-  background-color: #e3f2fd;
-}
-
-.card h3 {
-  margin-top: 0;
-  font-size: 18px;
-  color: #555;
-}
-
-.profit {
-  font-size: 24px;
-  font-weight: bold;
-  margin: 10px 0 0;
-}
-
-.ai-profit .profit {
-  color: #2e7d32;
-}
-
-.diamond-hands-profit .profit {
-  color: #1565c0;
-}
-
-.profit-difference {
-  text-align: center;
-  background-color: #f5f5f5;
-  padding: 15px;
-  border-radius: 8px;
-}
-
-.profit-difference h3 {
-  margin-top: 0;
-  font-size: 18px;
-  color: #333;
-}
-
-.difference {
-  font-size: 20px;
-  font-weight: bold;
-}
-
-.difference-text {
-  font-size: 16px;
-  font-weight: normal;
-}
-
-.positive {
-  color: #2e7d32;
-}
-
-.negative {
-  color: #c62828;
-}
-
-.stats-container {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 15px;
-}
-
-.stats-card {
-  background-color: #f8f9fa;
-  padding: 15px;
-  border-radius: 8px;
-  text-align: center;
-}
-
-.stats-card h3 {
-  margin-top: 0;
-  font-size: 16px;
-  color: #555;
-}
-
-.stat {
-  font-size: 20px;
-  font-weight: bold;
-  color: #333;
-  margin: 10px 0 0;
 }
 
 .chart-toggles {
@@ -173,7 +82,8 @@ body {
   border-color: #007bff;
 }
 
-.loading, .error {
+.loading,
+.error {
   text-align: center;
   font-size: 18px;
   margin-top: 50px;
@@ -184,42 +94,25 @@ body {
   color: #c62828;
 }
 
-.chart-controls {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
+.prediction-container {
+  margin-top: 20px;
+  background-color: #f0f4f8;
+  padding: 15px;
+  border-radius: 8px;
 }
 
-.zoom-button {
-  padding: 8px 16px;
-  font-size: 14px;
-  background-color: #f0f0f0;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.3s ease;
+.prediction-container h3 {
+  margin-top: 0;
 }
 
-.zoom-button:hover {
-  background-color: #e0e0e0;
+.prediction-container p {
+  font-size: 16px;
+  color: #333;
 }
-
-.zoom-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Update existing chart-toggles class */
-
 
 @media (max-width: 768px) {
-  .profit-cards {
+  .chart-toggles {
     flex-direction: column;
-  }
-  
-  .stats-container {
-    grid-template-columns: 1fr 1fr;
+    align-items: flex-start;
   }
 }
-
