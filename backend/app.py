@@ -16,13 +16,7 @@ def get_stock_data():
     symbol = request.args.get('symbol', 'SPY')
     result = process_stock_data(symbol)
     if result:
-        # Convert DataFrame to list of dictionaries for JSON serialization
-        result['data'] = result['data'].reset_index().to_dict('records')  # Now correctly calling reset_index()
-
-        # Ensure that data is serialized properly for Flask
-        result['ai_profit'] = int(result['ai_profit'])  # Convert int64 to int
-        result['diamond_hands_profit'] = int(result['diamond_hands_profit'])  # Convert int64 to int
-
+        # The data is already in the correct format (a list of dictionaries), so we don't need to reset the index
         return jsonify(result)
     return jsonify({'error': 'Failed to process stock data'}), 400
 
