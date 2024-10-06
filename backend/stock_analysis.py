@@ -1,6 +1,9 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report
 
 def fetch_data(symbol, start_date='2012-01-01', end_date='2024-10-04'):
     """
@@ -49,15 +52,49 @@ def calculate_returns(data):
     data['Cumulative_Return'] = (1 + data['Daily_Return']).cumprod() - 1
     return data
 
+def generate_future_signals(data, periods_forward=5):
+    future_price = data['Close'].shift(-periods_forward)
+    data['Future Return'] = (future_price - data['Close']) / data['Close']
+    
+    data['Buy Signal'] = np.where(data['Future Return'] > 0, 1, 0)
+    data['Sell Signal'] = np.where(data['Future Return'] < 0, 1, 0)
+    
+    return data
+
+# Random Forest Model to predict Buy/Sell signals
+def train_ai_model(data):
+    # Step 1: Prepare the features and target
+    features = ['SMA50', 'SMA200', 'RSI', 'MACD', 'Signal Line']
+    data = data.dropna()  # Remove rows with missing values
+
+    X = data[features]
+    y = data['Buy Signal']  # Using 'Buy Signal' as the target
+
+    # Step 2: Split into train and test sets
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+
+    # Step 3: Train a Random Forest model
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+
+    # Step 4: Predict and evaluate the model
+    y_pred = model.predict(X_test)
+    print(classification_report(y_test, y_pred))
+
+    # Step 5: Use the model to predict buy/sell signals on the entire dataset
+    data['AI Signal'] = model.predict(X)
+
+    return data, model
+
 def calculate_ai_model_profit(data, initial_investment=1000000):
     balance = initial_investment
     shares = 0
     
     for i in range(len(data)):
-        if data['RSI'].iloc[i] < 30 and shares == 0:  # Buy signal
+        if data['AI Signal'].iloc[i] == 1 and shares == 0:  # AI Buy Signal
             shares = balance / data['Close'].iloc[i]
             balance = 0
-        elif data['RSI'].iloc[i] > 70 and shares > 0:  # Sell signal
+        elif data['Sell Signal'].iloc[i] == 1 and shares > 0:  # AI Sell Signal
             balance = shares * data['Close'].iloc[i]
             shares = 0
     
@@ -87,6 +124,10 @@ def process_stock_data(symbol, start_date='2012-01-01', end_date='2024-10-04'):
     data = calculate_MACD(data)
     data = calculate_bollinger_bands(data)
     data = calculate_returns(data)
+    data = generate_future_signals(data)
+
+    # Train AI model and add AI signals to data
+    data, _ = train_ai_model(data)
 
     # Check if data has enough rows for the 52-week high/low calculation
     if len(data) >= 252:

@@ -35,108 +35,17 @@ body {
 
 .dashboard {
   display: grid;
-  grid-template-columns: 1fr;
   gap: 20px;
 }
 
-.stats-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 20px;
-}
-
-.card {
-  background-color: white;
-  border-radius: 8px;
-  padding: 20px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  transition: transform 0.3s ease;
-}
-
-.card:hover {
-  transform: translateY(-5px);
-}
-
-.card h2 {
-  margin-top: 0;
-  color: #333;
-  font-size: 16px;
-}
-
-.stat {
-  font-size: 24px;
-  font-weight: bold;
-  margin: 10px 0 0;
-  color: #007bff;
-}
-
-.chart-container {
+.profit-comparison-container, .stats-container, .chart-container {
   background-color: white;
   border-radius: 8px;
   padding: 20px;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 }
 
-.chart-container h2 {
-  margin-top: 0;
-  color: #333;
-  font-size: 18px;
-  margin-bottom: 20px;
-}
-
-.loading, .error {
-  text-align: center;
-  font-size: 18px;
-  margin-top: 50px;
-  color: #333;
-}
-
-.error {
-  color: #dc3545;
-}
-
-@media (max-width: 768px) {
-  .header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .stock-selector {
-    margin-top: 10px;
-  }
-
-  .stats-cards {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-.custom-tooltip {
-  background-color: rgba(255, 255, 255, 0.9);
-  border: 1px solid #ccc;
-  padding: 10px;
-  border-radius: 4px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.custom-tooltip .label {
-  font-weight: bold;
-  margin-bottom: 5px;
-}
-
-.custom-tooltip p {
-  margin: 0;
-  line-height: 1.5;
-}
-
-.profit-comparison {
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  padding: 20px;
-  margin-bottom: 20px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.profit-comparison h2 {
+.profit-comparison-container h2, .chart-container h2 {
   margin-top: 0;
   color: #333;
   font-size: 24px;
@@ -150,33 +59,44 @@ body {
   margin-bottom: 20px;
 }
 
-.profit-cards .card {
+.card {
   flex: 1;
+  padding: 15px;
+  border-radius: 8px;
   text-align: center;
 }
 
-.profit-cards .card h3 {
+.ai-profit {
+  background-color: #e8f5e9;
+}
+
+.diamond-hands-profit {
+  background-color: #e3f2fd;
+}
+
+.card h3 {
   margin-top: 0;
   font-size: 18px;
   color: #555;
 }
 
-.profit-cards .card .profit {
+.profit {
   font-size: 24px;
   font-weight: bold;
+  margin: 10px 0 0;
 }
 
 .ai-profit .profit {
-  color: #28a745;
+  color: #2e7d32;
 }
 
 .diamond-hands-profit .profit {
-  color: #007bff;
+  color: #1565c0;
 }
 
 .profit-difference {
   text-align: center;
-  background-color: #e9ecef;
+  background-color: #f5f5f5;
   padding: 15px;
   border-radius: 8px;
 }
@@ -187,30 +107,92 @@ body {
   color: #333;
 }
 
-.profit-difference .difference {
+.difference {
   font-size: 20px;
   font-weight: bold;
 }
 
-.profit-difference .positive {
-  color: #28a745;
+.difference-text {
+  font-size: 16px;
+  font-weight: normal;
 }
 
-.profit-difference .negative {
-  color: #dc3545;
+.positive {
+  color: #2e7d32;
 }
 
-/* Adjust the existing stats-cards for better layout */
-.stats-cards {
+.negative {
+  color: #c62828;
+}
+
+.stats-container {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 20px;
+  gap: 15px;
+}
+
+.stats-card {
+  background-color: #f8f9fa;
+  padding: 15px;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.stats-card h3 {
+  margin-top: 0;
+  font-size: 16px;
+  color: #555;
+}
+
+.stat {
+  font-size: 20px;
+  font-weight: bold;
+  color: #333;
+  margin: 10px 0 0;
+}
+
+.chart-toggles {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
   margin-bottom: 20px;
 }
 
-/* Responsive adjustments */
+.toggle-button {
+  padding: 8px 12px;
+  font-size: 14px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: #f8f9fa;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.toggle-button.active {
+  background-color: #007bff;
+  color: white;
+  border-color: #007bff;
+}
+
+.loading, .error {
+  text-align: center;
+  font-size: 18px;
+  margin-top: 50px;
+  color: #333;
+}
+
+.error {
+  color: #c62828;
+}
+
 @media (max-width: 768px) {
   .profit-cards {
     flex-direction: column;
   }
+  
+  .stats-container {
+    grid-template-columns: 1fr 1fr;
+  }
 }
+
