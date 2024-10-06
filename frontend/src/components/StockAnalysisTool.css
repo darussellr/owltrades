@@ -196,33 +196,3 @@ body {
   }
 }
 
-.chart-container {
-  position: relative;
-}
-
-.reset-zoom-button {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  padding: 8px 12px;
-  font-size: 14px;
-  background-color: #f0f0f0;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.3s ease;
-}
-
-.reset-zoom-button:hover {
-  background-color: #e0e0e0;
-}
-
-/* Ensure the chart area is interactive */
-.recharts-wrapper {
-  cursor: crosshair;
-}
-
-/* Style for the brush area */
-.recharts-reference-area {
-  pointer-events: none;
-}

@@ -1,8 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  ReferenceArea, ReferenceLine
-} from 'recharts';
+import React, { useState, useEffect } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './StockAnalysisTool.css';
 
 const StockAnalysisTool = () => {
@@ -17,9 +14,6 @@ const StockAnalysisTool = () => {
     BB_upper: true,
     BB_lower: true
   });
-  const [zoomState, setZoomState] = useState(null);
-  const [brushPosition, setBrushPosition] = useState({ x1: null, y1: null, x2: null, y2: null });
-  const chartRef = useRef(null);
 
   const symbols = ['SPY', 'AAPL', 'GOOGL', 'META', 'NFLX', 'AMZN', 'TSLA'];
   const lineColors = {
@@ -67,30 +61,6 @@ const StockAnalysisTool = () => {
     return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short' });
   };
 
-  const handleMouseDown = (e) => {
-    if (e && e.activeLabel) {
-      setBrushPosition({ x1: e.activeLabel, y1: e.activeCoordinate.y, x2: null, y2: null });
-    }
-  };
-
-  const handleMouseMove = (e) => {
-    if (e && e.activeLabel && brushPosition.x1) {
-      setBrushPosition(prev => ({ ...prev, x2: e.activeLabel, y2: e.activeCoordinate.y }));
-    }
-  };
-
-  const handleMouseUp = () => {
-    if (brushPosition.x1 && brushPosition.x2) {
-      const [x1, x2] = [brushPosition.x1, brushPosition.x2].sort();
-      setZoomState({ x1, x2 });
-    }
-    setBrushPosition({ x1: null, y1: null, x2: null, y2: null });
-  };
-
-  const resetZoom = () => {
-    setZoomState(null);
-  };
-
   if (loading) return <div className="loading">Loading...</div>;
   if (error) return <div className="error">{error}</div>;
 
@@ -112,8 +82,48 @@ const StockAnalysisTool = () => {
       </header>
 
       <div className="dashboard">
-        {/* Profit comparison and stats sections remain unchanged */}
-        
+        <div className="profit-comparison-container">
+          <h2>Profit Comparison</h2>
+          <div className="profit-cards">
+            <div className="card ai-profit">
+              <h3>AI Model Profit</h3>
+              <p className="profit">{formatCurrency(aiProfit)}</p>
+            </div>
+            <div className="card diamond-hands-profit">
+              <h3>Diamond Hands Profit</h3>
+              <p className="profit">{formatCurrency(diamondHandsProfit)}</p>
+            </div>
+          </div>
+          <div className="profit-difference">
+            <h3>AI Model Outperformance</h3>
+            <p className={`difference ${profitDifference >= 0 ? 'positive' : 'negative'}`}>
+              {formatCurrency(Math.abs(profitDifference))}
+              <span className="difference-text">
+                {profitDifference >= 0 ? ' more profit' : ' less profit'}
+              </span>
+            </p>
+          </div>
+        </div>
+
+        <div className="stats-container">
+          <div className="stats-card">
+            <h3>Latest Close</h3>
+            <p className="stat">{formatCurrency(stockData.latest_close)}</p>
+          </div>
+          <div className="stats-card">
+            <h3>52 Week High</h3>
+            <p className="stat">{formatCurrency(stockData.fifty_two_week_high)}</p>
+          </div>
+          <div className="stats-card">
+            <h3>52 Week Low</h3>
+            <p className="stat">{formatCurrency(stockData.fifty_two_week_low)}</p>
+          </div>
+          <div className="stats-card">
+            <h3>Total Return</h3>
+            <p className="stat">{formatPercentage(stockData.total_return)}</p>
+          </div>
+        </div>
+
         <div className="chart-container">
           <h2>{selectedStock} Stock Price</h2>
           <div className="chart-toggles">
@@ -127,26 +137,10 @@ const StockAnalysisTool = () => {
               </button>
             ))}
           </div>
-          {zoomState && (
-            <button onClick={resetZoom} className="reset-zoom-button">
-              Reset Zoom
-            </button>
-          )}
           <ResponsiveContainer width="100%" height={400}>
-            <LineChart
-              data={stockData.data}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-              ref={chartRef}
-            >
+            <LineChart data={stockData.data}>
               <CartesianGrid strokeDasharray="3 3" />
-              <XAxis
-                dataKey="Date"
-                tickFormatter={formatXAxis}
-                domain={zoomState ? [zoomState.x1, zoomState.x2] : ['auto', 'auto']}
-                type="category"
-              />
+              <XAxis dataKey="Date" tickFormatter={formatXAxis} />
               <YAxis domain={['auto', 'auto']} />
               <Tooltip />
               <Legend />
@@ -161,15 +155,6 @@ const StockAnalysisTool = () => {
                   />
                 )
               ))}
-              {brushPosition.x1 && brushPosition.x2 && (
-                <ReferenceArea
-                  x1={brushPosition.x1}
-                  x2={brushPosition.x2}
-                  strokeOpacity={0.3}
-                  fill="blue"
-                  fillOpacity={0.1}
-                />
-              )}
             </LineChart>
           </ResponsiveContainer>
         </div>
