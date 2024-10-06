@@ -1,7 +1,7 @@
 import yfinance as yf
 import pandas as pd
-from xgboost import XGBClassifier
-from sklearn.model_selection import train_test_split, GridSearchCV
+import numpy as np
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -9,10 +9,19 @@ from sklearn.metrics import (
     f1_score,
     confusion_matrix,
 )
+from sklearn.model_selection import train_test_split
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 import pymongo
 import pickle
 from datetime import datetime
 import os
+
+# Set random seeds for reproducibility
+np.random.seed(42)
+tf.random.set_seed(42)
 
 # MongoDB setup
 def connect_to_mongo():
@@ -57,94 +66,101 @@ def prepare_all_features(data):
     data["Upper Band"] = data["20 Day MA"] + (data["20 Day STD"] * 2)
     data["Lower Band"] = data["20 Day MA"] - (data["20 Day STD"] * 2)
 
-    # Buy Signal: Next day's closing price is higher than today's
-    data["Buy Signal"] = (data["Close"].shift(-1) > data["Close"]).astype(int)
+    # Momentum
+    data["Momentum"] = data["Close"] - data["Close"].shift(10)
+
+    # Rate of Change
+    data["ROC"] = data["Close"].pct_change(periods=10)
+
+    # Future Price Movement
+    data["Future_Close"] = data["Close"].shift(-5)
+    data["Price_Change"] = (data["Future_Close"] - data["Close"]) / data["Close"]
+    data["Buy_Signal"] = (data["Price_Change"] > 0.02).astype(int)  # Predict >2% increase
+
     data.dropna(inplace=True)
 
-# Train model using XGBoost with GridSearchCV
-def train_model(data, features):
-    X = data[features]
-    y = data["Buy Signal"]
+# Prepare data for LSTM
+def create_sequences(X, y, time_steps=60):
+    Xs, ys = [], []
+    for i in range(len(X) - time_steps):
+        Xs.append(X.iloc[i:(i + time_steps)].values)
+        ys.append(y.iloc[i + time_steps])
+    return np.array(Xs), np.array(ys)
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
+# Build LSTM model
+def build_lstm_model(input_shape):
+    model = Sequential()
+    model.add(LSTM(128, return_sequences=True, input_shape=input_shape))
+    model.add(Dropout(0.3))
+    model.add(LSTM(64, return_sequences=True))
+    model.add(Dropout(0.3))
+    model.add(LSTM(32))
+    model.add(Dropout(0.3))
+    model.add(Dense(1, activation='sigmoid'))
+    optimizer = tf.keras.optimizers.Adam(learning_rate=0.0005)
+    model.compile(
+        loss='binary_crossentropy',
+        optimizer=optimizer,
+        metrics=['accuracy']
+    )
+    return model
+
+# Train and evaluate the model
+def train_evaluate_model(X_train, y_train, X_test, y_test, class_weight):
+    model = build_lstm_model((X_train.shape[1], X_train.shape[2]))
+
+    # Adjusted EarlyStopping
+    early_stopping = EarlyStopping(
+        monitor='val_loss',
+        patience=15,
+        restore_best_weights=True
     )
 
-    # Check if y_train and y_test contain both classes
-    if len(set(y_train)) < 2 or len(set(y_test)) < 2:
-        print("Not enough classes in y_train or y_test. Skipping this period.")
-        return None, None, None, None, None, None, None, None
-
-    # Define parameter grid
-    param_grid = {
-        'max_depth': [3, 5, 7],
-        'learning_rate': [0.01, 0.1, 0.2],
-        'n_estimators': [50, 100, 150],
-        'subsample': [0.6, 0.8, 1.0],
-        'colsample_bytree': [0.6, 0.8, 1.0],
-    }
-
-    xgb_model = XGBClassifier(
-        eval_metric="logloss",
-    )
-
-    grid_search = GridSearchCV(
-        estimator=xgb_model,
-        param_grid=param_grid,
-        scoring='f1',
-        cv=3,
-        n_jobs=-1,
+    history = model.fit(
+        X_train, y_train,
+        epochs=200,
+        batch_size=32,
+        validation_data=(X_test, y_test),
+        callbacks=[early_stopping],
         verbose=1,
+        shuffle=False,
+        class_weight=class_weight
     )
-    
-    # Fit the model
-    grid_search.fit(X_train, y_train)
 
-    # Get the best model and parameters
-    model = grid_search.best_estimator_
-    best_params = grid_search.best_params_
-    cv_results = grid_search.cv_results_
+    y_pred_prob = model.predict(X_test)
+    y_pred = (y_pred_prob > 0.5).astype(int).flatten()
 
-    # Display the top 5 parameter combinations
-    results_df = pd.DataFrame(cv_results)
-    results_df = results_df.sort_values(by='mean_test_score', ascending=False)
-    top_results = results_df[['params', 'mean_test_score', 'std_test_score']].head(5)
-    print("\nTop 5 parameter combinations:")
-    print(top_results.to_string(index=False))
-
-    y_pred = model.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
-
-    # Compute confusion matrix with predefined labels
-    cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
-
-    # Compute precision, recall, f1_score
     precision = precision_score(y_test, y_pred, zero_division=0)
     recall = recall_score(y_test, y_pred, zero_division=0)
     f1 = f1_score(y_test, y_pred, zero_division=0)
+    cm = confusion_matrix(y_test, y_pred)
 
-    hyperparameters = best_params  # Use the best parameters
-
-    return model, accuracy, precision, recall, f1, cm, hyperparameters, cv_results
+    return model, history, accuracy, precision, recall, f1, cm
 
 # Save the model and performance metrics to MongoDB
 def save_model_to_mongo(
     symbol,
     label,
     model,
+    scaler,
     accuracy,
     precision,
     recall,
     f1,
     cm,
-    hyperparameters,
     features_used,
     trainingDataStartDate,
     trainingDataEndDate,
-    cv_results,
     db,
 ):
-    model_data = pickle.dumps(model)
+    # Serialize model and scaler
+    # Note: For Keras models, it's better to save using model.save() method
+    model_path = f"{symbol}_{label}_model.h5"
+    scaler_path = f"{symbol}_{label}_scaler.pkl"
+    model.save(model_path)
+    with open(scaler_path, 'wb') as f:
+        pickle.dump(scaler, f)
 
     # Extract confusion matrix elements safely
     tn, fp, fn, tp = cm.ravel()
@@ -165,16 +181,14 @@ def save_model_to_mongo(
     model_document = {
         "symbol": symbol,
         "label": label,
-        "model": model_data,  # Serialized model data
-        "version": 1,  # Increment if needed
+        "model_path": model_path,
+        "scaler_path": scaler_path,
+        "version": 1,
         "trainedAt": datetime.utcnow(),
         "trainingDataStartDate": trainingDataStartDate,
         "trainingDataEndDate": trainingDataEndDate,
         "featuresUsed": features_used,
-        "hyperparameters": hyperparameters,
         "performance": performance_metrics,
-        # Optionally store cv_results (be cautious as it can be large)
-        # "cv_results": cv_results,
     }
 
     # Perform upsert: update if exists, insert if not
@@ -195,48 +209,24 @@ def save_model_to_mongo(
 def summarize_performance(all_metrics):
     summary = {}
     for symbol in all_metrics:
-        metrics_list = all_metrics[symbol]
-        # Flatten nested dictionaries
-        df = pd.json_normalize(metrics_list)
-        # Exclude confusion matrix columns for averaging
-        numerical_columns = ['accuracy', 'precision', 'recall', 'f1_score']
-        avg_metrics = df[numerical_columns].mean().to_dict()
-        summary[symbol] = avg_metrics
-        print(f"\nSummary for {symbol}:")
-        print(f"Average Accuracy: {avg_metrics['accuracy']:.4f}")
-        print(f"Average Precision: {avg_metrics['precision']:.4f}")
-        print(f"Average Recall: {avg_metrics['recall']:.4f}")
-        print(f"Average F1 Score: {avg_metrics['f1_score']:.4f}")
+        metrics = all_metrics[symbol][0]  # Only one set of metrics per symbol
+        print(f"\nPerformance for {symbol}:")
+        print(f"Accuracy: {metrics['accuracy']:.4f}")
+        print(f"Precision: {metrics['precision']:.4f}")
+        print(f"Recall: {metrics['recall']:.4f}")
+        print(f"F1 Score: {metrics['f1_score']:.4f}")
+        summary[symbol] = metrics
 
-    # Overall summary
-    all_metrics_combined = []
-    for metrics_list in all_metrics.values():
-        all_metrics_combined.extend(metrics_list)
-    df_overall = pd.json_normalize(all_metrics_combined)
-    avg_overall_metrics = df_overall[numerical_columns].mean().to_dict()
-    print("\nOverall Summary:")
-    print(f"Average Accuracy: {avg_overall_metrics['accuracy']:.4f}")
-    print(f"Average Precision: {avg_overall_metrics['precision']:.4f}")
-    print(f"Average Recall: {avg_overall_metrics['recall']:.4f}")
-    print(f"Average F1 Score: {avg_overall_metrics['f1_score']:.4f}")
-
-# Train models and save to MongoDB
-def create_predefined_models(symbols):
+# Main function to run the process
+def create_lstm_models(symbols):
     db = connect_to_mongo()
     all_metrics = {}  # For summarizing performance metrics
 
     for symbol in symbols:
         print(f"\nProcessing {symbol}...")
-        full_data = fetch_data(symbol, start_date="2012-01-01", end_date="2024-10-04")
-        prepare_all_features(full_data)
+        data = fetch_data(symbol, start_date="2010-01-01", end_date="2024-10-04")
+        prepare_all_features(data)
 
-        periods = [
-            ("6m", 6),
-            ("1y", 12),
-            ("7y_part1", 84),
-            ("7y_part2", 168),
-            ("full", None),
-        ]
         features = [
             "SMA50",
             "SMA200",
@@ -245,51 +235,66 @@ def create_predefined_models(symbols):
             "Signal Line",
             "Upper Band",
             "Lower Band",
+            "Momentum",
+            "ROC",
             "Close",
         ]
 
-        symbol_metrics = []  # Store metrics for this symbol
+        X = data[features]
+        y = data["Buy_Signal"]
 
-        for label, months in periods:
-            print(f"\nTraining model for {symbol} - {label}")
-            period_data = full_data.tail(months * 21) if months else full_data
+        # Feature scaling
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+        X_scaled = pd.DataFrame(X_scaled, index=X.index, columns=X.columns)
 
-            if period_data.shape[0] < 50:
-                print(f"Not enough data for {label} period of {symbol}. Skipping...")
-                continue
+        # Create sequences
+        time_steps = 60  # Use 60 days of data to predict the next movement
+        X_seq, y_seq = create_sequences(X_scaled, y, time_steps)
 
-            result = train_model(period_data, features)
-            if result[0] is None:
-                print(f"Skipping {symbol} ({label}) due to insufficient class labels.")
-                continue
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_seq, y_seq, test_size=0.2, shuffle=False
+        )
 
-            model, accuracy, precision, recall, f1, cm, hyperparameters, cv_results = result
+        # Check if both classes are present
+        if len(np.unique(y_train)) < 2 or len(np.unique(y_test)) < 2:
+            print(f"Not enough class diversity for {symbol}. Skipping...")
+            continue
 
-            trainingDataStartDate = period_data.index.min().strftime("%Y-%m-%d")
-            trainingDataEndDate = period_data.index.max().strftime("%Y-%m-%d")
+        # Address class imbalance
+        from collections import Counter
+        counter = Counter(y_train)
+        majority = max(counter.values())
+        class_weight = {cls: float(majority/count) for cls, count in counter.items()}
 
-            performance_metrics = save_model_to_mongo(
-                symbol,
-                label,
-                model,
-                accuracy,
-                precision,
-                recall,
-                f1,
-                cm,
-                hyperparameters,
-                features_used=features,
-                trainingDataStartDate=trainingDataStartDate,
-                trainingDataEndDate=trainingDataEndDate,
-                cv_results=cv_results,
-                db=db,
-            )
+        # Train and evaluate the model
+        model, history, accuracy, precision, recall, f1, cm = train_evaluate_model(
+            X_train, y_train, X_test, y_test, class_weight
+        )
 
-            # Collect metrics for summarization
-            symbol_metrics.append(performance_metrics)
+        trainingDataStartDate = data.index.min().strftime("%Y-%m-%d")
+        trainingDataEndDate = data.index.max().strftime("%Y-%m-%d")
 
-        if symbol_metrics:
-            all_metrics[symbol] = symbol_metrics
+        performance_metrics = save_model_to_mongo(
+            symbol,
+            label="LSTM",
+            model=model,
+            scaler=scaler,
+            accuracy=accuracy,
+            precision=precision,
+            recall=recall,
+            f1=f1,
+            cm=cm,
+            features_used=features,
+            trainingDataStartDate=trainingDataStartDate,
+            trainingDataEndDate=trainingDataEndDate,
+            db=db,
+        )
+
+        # Collect metrics for summarization
+        if performance_metrics:
+            all_metrics[symbol] = [performance_metrics]
 
     # Summarize performance metrics
     if all_metrics:
@@ -299,4 +304,4 @@ def create_predefined_models(symbols):
 
 if __name__ == "__main__":
     symbols = ["SPY", "AAPL", "GOOGL", "AMZN", "TSLA", "META", "NFLX"]
-    create_predefined_models(symbols)
+    create_lstm_models(symbols)
