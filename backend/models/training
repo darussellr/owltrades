@@ -1,7 +1,8 @@
 import yfinance as yf
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
 from joblib import dump
+import os
 
 # Fetch stock data
 def fetch_data(symbol, start_date, end_date):
@@ -39,35 +40,71 @@ def prepare_all_features(data):
     data['Stochastic Oscillator'] = 100 * (data['Close'] - data['Lowest Low']) / (data['Highest High'] - data['Lowest Low'])
     data['Williams %R'] = (data['Highest High'] - data['Close']) / (data['Highest High'] - data['Lowest Low']) * -100
     data['Direction'] = (data['Close'] > data['Close'].shift(1)).astype(int)
-    data['OBV'] = data['Volume'] * data['Direction'].cumsum()
+    data['OBV'] = (data['Volume'] * data['Direction']).cumsum()
     data['ROC'] = ((data['Close'] - data['Close'].shift(12)) / data['Close'].shift(12)) * 100
     data['Volatility'] = data['Close'].rolling(window=21).std()
 
+    # Example Buy Signal: You need to define how 'Buy Signal' is determined
+    # Here's a simple example using RSI
+    data['Buy Signal'] = ((data['RSI'] < 30) & (data['MACD'] > data['Signal Line'])).astype(int)
+
+    # Drop rows with any NaN values resulting from feature calculations
+    data.dropna(inplace=True)
+
 def train_model(data, features, save_path):
-    X = data[features].dropna()
-    y = data['Buy Signal']  # Assuming this is the target
-    model = RandomForestClassifier(n_estimators=100)
+    X = data[features]
+    y = data['Buy Signal']  # Ensure 'Buy Signal' is properly defined in prepare_all_features
+
+    # Initialize XGBoost classifier
+    model = XGBClassifier(
+        n_estimators=100,
+        learning_rate=0.1,
+        max_depth=5,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        use_label_encoder=False,
+        eval_metric='logloss'
+    )
+
+    # Fit the model
     model.fit(X, y)
+
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    # Save the model
     dump(model, save_path)
+    print(f"Model saved to {save_path}")
 
 def create_predefined_models(symbol):
     full_data = fetch_data(symbol, start_date='2012-01-01', end_date='2024-10-04')
     prepare_all_features(full_data)
     
+    # Define the target variable correctly
+    # Ensure 'Buy Signal' exists; otherwise, modify the feature preparation accordingly
+
     # Train models for different time intervals using all features
     periods = [('6m', 6), ('1y', 12), ('7y_part1', 84), ('7y_part2', 168), ('full', None)]
-    features = ['SMA50', 'SMA200', 'EMA50', 'EMA200', 'RSI', 'MACD', 'Signal Line', 'Middle Band', 
-                'Upper Band', 'Lower Band', 'ATR', 'Momentum', 'Stochastic Oscillator', 'Williams %R',
-                'OBV', 'ROC', 'Volatility']
+    features = [
+        'SMA50', 'SMA200', 'EMA50', 'EMA200', 'RSI', 'MACD', 'Signal Line',
+        'Middle Band', 'Upper Band', 'Lower Band', 'ATR', 'Momentum',
+        'Stochastic Oscillator', 'Williams %R', 'OBV', 'ROC', 'Volatility'
+    ]
     
     for label, months in periods:
         if months:
-            period_data = full_data[-months*21:]  # Approx 21 trading days per month
+            period_data = full_data.tail(months * 21)  # Approx 21 trading days per month
         else:
             period_data = full_data
             
+        # Check if there is enough data
+        if period_data.shape[0] < 50:  # Example threshold
+            print(f"Not enough data for period {label}. Skipping...")
+            continue
+
         # Train model using all features
-        train_model(period_data, features, f'models/{symbol}_{label}_all_features_model.joblib')
+        save_path = f'models/{symbol}_{label}_all_features_model.joblib'
+        train_model(period_data, features, save_path)
 
 # Example usage: Create models for SPY with all features
 if __name__ == "__main__":
