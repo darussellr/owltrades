@@ -7,6 +7,10 @@ from stock_analysis import process_stock_data
 app = Flask(__name__)
 CORS(app)  # This will enable CORS for all routes
 
+@app.route('/')
+def home():
+    return "Welcome to the Stock Analysis API!", 200
+
 @app.route('/api/stock-data')
 def get_stock_data():
     symbol = request.args.get('symbol', 'SPY')

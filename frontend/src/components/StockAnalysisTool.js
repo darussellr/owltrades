@@ -11,17 +11,19 @@ const StockAnalysisTool = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      try {
-        setLoading(true);
-        // In a real application, you would fetch this data from your backend
-        const response = await fetch(`http://localhost:5000/api/stock-data?symbol=${selectedStock}`);
-        const data = await response.json();
-        setStockData(data);
-        setLoading(false);
-      } catch (err) {
-        setError('Failed to fetch stock data');
-        setLoading(false);
-      }
+        try {
+            setLoading(true);
+            const response = await fetch(`http://localhost:5000/api/stock-data?symbol=${selectedStock}`);
+            if (!response.ok) {
+                throw new Error('Network response was not ok ' + response.statusText);
+            }
+            const data = await response.json();
+            setStockData(data);
+            setLoading(false);
+        } catch (err) {
+            setError('Failed to fetch stock data: ' + err.message);
+            setLoading(false);
+        }
     };
 
     fetchData();
