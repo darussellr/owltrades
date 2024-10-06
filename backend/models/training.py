@@ -1,7 +1,7 @@
 import yfinance as yf
 import pandas as pd
 from xgboost import XGBClassifier
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -61,7 +61,7 @@ def prepare_all_features(data):
     data["Buy Signal"] = (data["Close"].shift(-1) > data["Close"]).astype(int)
     data.dropna(inplace=True)
 
-# Train model using XGBoost
+# Train model using XGBoost with GridSearchCV
 def train_model(data, features):
     X = data[features]
     y = data["Buy Signal"]
@@ -73,18 +73,44 @@ def train_model(data, features):
     # Check if y_train and y_test contain both classes
     if len(set(y_train)) < 2 or len(set(y_test)) < 2:
         print("Not enough classes in y_train or y_test. Skipping this period.")
-        return None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None
 
-    model = XGBClassifier(
-        n_estimators=100,
-        learning_rate=0.1,
-        max_depth=5,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        use_label_encoder=False,
+    # Define parameter grid
+    param_grid = {
+        'max_depth': [3, 5, 7],
+        'learning_rate': [0.01, 0.1, 0.2],
+        'n_estimators': [50, 100, 150],
+        'subsample': [0.6, 0.8, 1.0],
+        'colsample_bytree': [0.6, 0.8, 1.0],
+    }
+
+    xgb_model = XGBClassifier(
         eval_metric="logloss",
     )
-    model.fit(X_train, y_train)
+
+    grid_search = GridSearchCV(
+        estimator=xgb_model,
+        param_grid=param_grid,
+        scoring='f1',
+        cv=3,
+        n_jobs=-1,
+        verbose=1,
+    )
+    
+    # Fit the model
+    grid_search.fit(X_train, y_train)
+
+    # Get the best model and parameters
+    model = grid_search.best_estimator_
+    best_params = grid_search.best_params_
+    cv_results = grid_search.cv_results_
+
+    # Display the top 5 parameter combinations
+    results_df = pd.DataFrame(cv_results)
+    results_df = results_df.sort_values(by='mean_test_score', ascending=False)
+    top_results = results_df[['params', 'mean_test_score', 'std_test_score']].head(5)
+    print("\nTop 5 parameter combinations:")
+    print(top_results.to_string(index=False))
 
     y_pred = model.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
@@ -97,9 +123,9 @@ def train_model(data, features):
     recall = recall_score(y_test, y_pred, zero_division=0)
     f1 = f1_score(y_test, y_pred, zero_division=0)
 
-    hyperparameters = model.get_params()
+    hyperparameters = best_params  # Use the best parameters
 
-    return model, accuracy, precision, recall, f1, cm, hyperparameters
+    return model, accuracy, precision, recall, f1, cm, hyperparameters, cv_results
 
 # Save the model and performance metrics to MongoDB
 def save_model_to_mongo(
@@ -115,6 +141,7 @@ def save_model_to_mongo(
     features_used,
     trainingDataStartDate,
     trainingDataEndDate,
+    cv_results,
     db,
 ):
     model_data = pickle.dumps(model)
@@ -146,6 +173,8 @@ def save_model_to_mongo(
         "featuresUsed": features_used,
         "hyperparameters": hyperparameters,
         "performance": performance_metrics,
+        # Optionally store cv_results (be cautious as it can be large)
+        # "cv_results": cv_results,
     }
 
     # Perform upsert: update if exists, insert if not
@@ -167,8 +196,11 @@ def summarize_performance(all_metrics):
     summary = {}
     for symbol in all_metrics:
         metrics_list = all_metrics[symbol]
-        df = pd.DataFrame(metrics_list)
-        avg_metrics = df.mean().to_dict()
+        # Flatten nested dictionaries
+        df = pd.json_normalize(metrics_list)
+        # Exclude confusion matrix columns for averaging
+        numerical_columns = ['accuracy', 'precision', 'recall', 'f1_score']
+        avg_metrics = df[numerical_columns].mean().to_dict()
         summary[symbol] = avg_metrics
         print(f"\nSummary for {symbol}:")
         print(f"Average Accuracy: {avg_metrics['accuracy']:.4f}")
@@ -180,8 +212,8 @@ def summarize_performance(all_metrics):
     all_metrics_combined = []
     for metrics_list in all_metrics.values():
         all_metrics_combined.extend(metrics_list)
-    df_overall = pd.DataFrame(all_metrics_combined)
-    avg_overall_metrics = df_overall.mean().to_dict()
+    df_overall = pd.json_normalize(all_metrics_combined)
+    avg_overall_metrics = df_overall[numerical_columns].mean().to_dict()
     print("\nOverall Summary:")
     print(f"Average Accuracy: {avg_overall_metrics['accuracy']:.4f}")
     print(f"Average Precision: {avg_overall_metrics['precision']:.4f}")
@@ -219,18 +251,19 @@ def create_predefined_models(symbols):
         symbol_metrics = []  # Store metrics for this symbol
 
         for label, months in periods:
+            print(f"\nTraining model for {symbol} - {label}")
             period_data = full_data.tail(months * 21) if months else full_data
 
             if period_data.shape[0] < 50:
                 print(f"Not enough data for {label} period of {symbol}. Skipping...")
                 continue
 
-            model, accuracy, precision, recall, f1, cm, hyperparameters = train_model(
-                period_data, features
-            )
-            if model is None:
+            result = train_model(period_data, features)
+            if result[0] is None:
                 print(f"Skipping {symbol} ({label}) due to insufficient class labels.")
                 continue
+
+            model, accuracy, precision, recall, f1, cm, hyperparameters, cv_results = result
 
             trainingDataStartDate = period_data.index.min().strftime("%Y-%m-%d")
             trainingDataEndDate = period_data.index.max().strftime("%Y-%m-%d")
@@ -248,6 +281,7 @@ def create_predefined_models(symbols):
                 features_used=features,
                 trainingDataStartDate=trainingDataStartDate,
                 trainingDataEndDate=trainingDataEndDate,
+                cv_results=cv_results,
                 db=db,
             )
 
