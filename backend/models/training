@@ -1,8 +1,19 @@
 import yfinance as yf
 import pandas as pd
 from xgboost import XGBClassifier
-from joblib import dump
+from joblib import dump, load
 import os
+import pymongo
+from bson.binary import Binary
+import pickle
+
+# MongoDB setup
+def connect_to_mongo():
+    # Replace with your MongoDB Atlas connection string
+    mongo_uri = "your_mongo_atlas_connection_string"
+    client = pymongo.MongoClient(mongo_uri)
+    db = client['stock_trading_models']  # Database name
+    return db
 
 # Fetch stock data
 def fetch_data(symbol, start_date, end_date):
@@ -45,15 +56,14 @@ def prepare_all_features(data):
     data['Volatility'] = data['Close'].rolling(window=21).std()
 
     # Example Buy Signal: You need to define how 'Buy Signal' is determined
-    # Here's a simple example using RSI
     data['Buy Signal'] = ((data['RSI'] < 30) & (data['MACD'] > data['Signal Line'])).astype(int)
 
     # Drop rows with any NaN values resulting from feature calculations
     data.dropna(inplace=True)
 
-def train_model(data, features, save_path):
+def train_model(data, features):
     X = data[features]
-    y = data['Buy Signal']  # Ensure 'Buy Signal' is properly defined in prepare_all_features
+    y = data['Buy Signal']
 
     # Initialize XGBoost classifier
     model = XGBClassifier(
@@ -68,44 +78,59 @@ def train_model(data, features, save_path):
 
     # Fit the model
     model.fit(X, y)
+    return model
 
-    # Ensure the directory exists
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-
-    # Save the model
-    dump(model, save_path)
-    print(f"Model saved to {save_path}")
-
-def create_predefined_models(symbol):
-    full_data = fetch_data(symbol, start_date='2012-01-01', end_date='2024-10-04')
-    prepare_all_features(full_data)
+# Save the model to MongoDB
+def save_model_to_mongo(symbol, label, model, db):
+    model_data = pickle.dumps(model)
+    binary_model = Binary(model_data)
     
-    # Define the target variable correctly
-    # Ensure 'Buy Signal' exists; otherwise, modify the feature preparation accordingly
+    # Insert model into MongoDB
+    db.models.insert_one({
+        'symbol': symbol,
+        'label': label,
+        'model': binary_model,
+        'features': ['SMA50', 'SMA200', 'EMA50', 'EMA200', 'RSI', 'MACD', 'Signal Line', 
+                     'Middle Band', 'Upper Band', 'Lower Band', 'ATR', 'Momentum', 
+                     'Stochastic Oscillator', 'Williams %R', 'OBV', 'ROC', 'Volatility']
+    })
+    print(f"Model for {symbol} ({label}) saved to MongoDB.")
 
-    # Train models for different time intervals using all features
-    periods = [('6m', 6), ('1y', 12), ('7y_part1', 84), ('7y_part2', 168), ('full', None)]
-    features = [
-        'SMA50', 'SMA200', 'EMA50', 'EMA200', 'RSI', 'MACD', 'Signal Line',
-        'Middle Band', 'Upper Band', 'Lower Band', 'ATR', 'Momentum',
-        'Stochastic Oscillator', 'Williams %R', 'OBV', 'ROC', 'Volatility'
-    ]
-    
-    for label, months in periods:
-        if months:
-            period_data = full_data.tail(months * 21)  # Approx 21 trading days per month
-        else:
-            period_data = full_data
+# Create models and store them in MongoDB for multiple stocks
+def create_predefined_models(symbols):
+    db = connect_to_mongo()  # Connect to MongoDB
+
+    for symbol in symbols:
+        print(f"Processing {symbol}...")
+        full_data = fetch_data(symbol, start_date='2012-01-01', end_date='2024-10-04')
+        prepare_all_features(full_data)
+        
+        # Define the periods and train models
+        periods = [('6m', 6), ('1y', 12), ('7y_part1', 84), ('7y_part2', 168), ('full', None)]
+        features = [
+            'SMA50', 'SMA200', 'EMA50', 'EMA200', 'RSI', 'MACD', 'Signal Line',
+            'Middle Band', 'Upper Band', 'Lower Band', 'ATR', 'Momentum',
+            'Stochastic Oscillator', 'Williams %R', 'OBV', 'ROC', 'Volatility'
+        ]
+        
+        for label, months in periods:
+            if months:
+                period_data = full_data.tail(months * 21)  # Approx 21 trading days per month
+            else:
+                period_data = full_data
             
-        # Check if there is enough data
-        if period_data.shape[0] < 50:  # Example threshold
-            print(f"Not enough data for period {label}. Skipping...")
-            continue
+            # Check if there is enough data
+            if period_data.shape[0] < 50:  # Example threshold
+                print(f"Not enough data for period {label} for {symbol}. Skipping...")
+                continue
 
-        # Train model using all features
-        save_path = f'models/{symbol}_{label}_all_features_model.joblib'
-        train_model(period_data, features, save_path)
+            # Train model using all features
+            model = train_model(period_data, features)
+            
+            # Save the model to MongoDB
+            save_model_to_mongo(symbol, label, model, db)
 
-# Example usage: Create models for SPY with all features
+# Example usage: Create models for multiple stocks and store them in MongoDB
 if __name__ == "__main__":
-    create_predefined_models('SPY')
+    symbols = ['SPY', 'AAPL', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NFLX']  # List of stock symbols
+    create_predefined_models(symbols)
