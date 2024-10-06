@@ -3,9 +3,6 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report
 
 # Step 1: Fetch historical stock data for multiple stocks (daily intervals)
 def fetch_data(symbol, start_date='2012-01-01', end_date='2024-10-04'):
@@ -42,14 +39,31 @@ def calculate_MACD(data):
     data['Signal Line'] = data['MACD'].ewm(span=9, adjust=False).mean()
     return data
 
-# Step 5: Generate buy/sell signals based on future price movements
+# Step 5: Generate buy/sell signals based on future price movements and prevent overlapping signals
 def generate_future_signals(data, periods_forward=5):
     future_price = data['Close'].shift(-periods_forward)
     data['Future Return'] = (future_price - data['Close']) / data['Close']
     
-    data['Buy Signal'] = np.where(data['Future Return'] > 0, 1, 0)
-    data['Sell Signal'] = np.where(data['Future Return'] < 0, 1, 0)
-    
+    buy_signals = []
+    sell_signals = []
+    holding = False  # Track whether we are holding a stock
+
+    for i in range(len(data)):
+        if data['Future Return'].iloc[i] > 0 and not holding:
+            buy_signals.append(1)
+            sell_signals.append(0)
+            holding = True  # Now we are holding stock
+        elif data['Future Return'].iloc[i] < 0 and holding:
+            buy_signals.append(0)
+            sell_signals.append(1)
+            holding = False  # Now we sold stock
+        else:
+            buy_signals.append(0)
+            sell_signals.append(0)
+
+    data['Buy Signal'] = buy_signals
+    data['Sell Signal'] = sell_signals
+
     return data
 
 # Step 6: Calculate AI model's profit based on buy/sell signals
@@ -89,9 +103,9 @@ def calculate_diamond_hands_profit(data, initial_investment=1000000):
 # Step 8: Interactive Plotly Graph with Stock Options
 def plot_interactive_graph(stock_data, stock_symbol, ai_profit, diamond_hands_profit):
     fig = make_subplots(rows=2, cols=1, 
-                        row_heights=[0.1, 0.9], 
+                        row_heights=[0.15, 0.85], 
                         shared_xaxes=True,
-                        vertical_spacing=0.03)
+                        vertical_spacing=0.05)
     
     # Headers for AI and Diamond Hands profits
     fig.add_trace(go.Scatter(x=[0], y=[0], mode='text', 
@@ -106,21 +120,21 @@ def plot_interactive_graph(stock_data, stock_symbol, ai_profit, diamond_hands_pr
     fig.add_trace(go.Scatter(x=stock_data.index, y=stock_data['Close'],
                              mode='lines', name=f'{stock_symbol} Close Price'), row=2, col=1)
 
-    # Plot Buy signals
+    # Plot Buy signals (slightly higher than the Close price)
     buy_signals = stock_data[stock_data['Buy Signal'] == 1]
-    fig.add_trace(go.Scatter(x=buy_signals.index, y=buy_signals['Close'],
+    fig.add_trace(go.Scatter(x=buy_signals.index, y=buy_signals['Close'] * 1.01,  # Offset by 1% for visibility
                              mode='markers', marker=dict(symbol='triangle-up', color='green', size=10),
-                             name='Buy Signal'), row=2, col=1)
+                             name=f'{stock_symbol} Buy Signal'), row=2, col=1)
 
-    # Plot Sell signals
+    # Plot Sell signals (slightly lower than the Close price)
     sell_signals = stock_data[stock_data['Sell Signal'] == 1]
-    fig.add_trace(go.Scatter(x=sell_signals.index, y=sell_signals['Close'],
+    fig.add_trace(go.Scatter(x=sell_signals.index, y=sell_signals['Close'] * 0.99,  # Offset by -1% for visibility
                              mode='markers', marker=dict(symbol='triangle-down', color='red', size=10),
-                             name='Sell Signal'), row=2, col=1)
+                             name=f'{stock_symbol} Sell Signal'), row=2, col=1)
 
     # Update layout
     fig.update_layout(title=f'{stock_symbol} Buy and Sell Signals', xaxis_title='Date', yaxis_title='Price',
-                      height=700, hovermode='x unified')
+                      height=800, hovermode='x unified', margin=dict(t=100, l=50, r=50, b=50))
 
     return fig
 
@@ -151,7 +165,7 @@ symbol_to_plot = 'SPY'
 fig = plot_interactive_graph(stock_data_dict[symbol_to_plot], symbol_to_plot, 
                              ai_profits[symbol_to_plot], diamond_hands_profits[symbol_to_plot])
 
-# Add buttons for selecting different stocks
+# Add buttons for selecting different stocks and updating the title dynamically
 fig.update_layout(
     updatemenus=[
         dict(
@@ -159,37 +173,44 @@ fig.update_layout(
                 dict(label="S&P 500", method="update", 
                      args=[{"x": [stock_data_dict['SPY'].index], 
                             "y": [stock_data_dict['SPY']['Close']]}, 
-                           {"annotations": [{"text": f"AI Model Profit: ${ai_profits['SPY']:,.2f}", "showarrow": False},
+                           {"title": "S&P 500 Buy and Sell Signals",  # Dynamic title change
+                            "annotations": [{"text": f"AI Model Profit: ${ai_profits['SPY']:,.2f}", "showarrow": False},
                                             {"text": f"Diamond Hands Profit: ${diamond_hands_profits['SPY']:,.2f}", "showarrow": False}]}]),
                 dict(label="Apple", method="update", 
                      args=[{"x": [stock_data_dict['AAPL'].index], 
                             "y": [stock_data_dict['AAPL']['Close']]}, 
-                           {"annotations": [{"text": f"AI Model Profit: ${ai_profits['AAPL']:,.2f}", "showarrow": False},
+                           {"title": "Apple Buy and Sell Signals",  # Dynamic title change
+                            "annotations": [{"text": f"AI Model Profit: ${ai_profits['AAPL']:,.2f}", "showarrow": False},
                                             {"text": f"Diamond Hands Profit: ${diamond_hands_profits['AAPL']:,.2f}", "showarrow": False}]}]),
                 dict(label="Google", method="update", 
                      args=[{"x": [stock_data_dict['GOOGL'].index], 
                             "y": [stock_data_dict['GOOGL']['Close']]}, 
-                           {"annotations": [{"text": f"AI Model Profit: ${ai_profits['GOOGL']:,.2f}", "showarrow": False},
+                           {"title": "Google Buy and Sell Signals",  # Dynamic title change
+                            "annotations": [{"text": f"AI Model Profit: ${ai_profits['GOOGL']:,.2f}", "showarrow": False},
                                             {"text": f"Diamond Hands Profit: ${diamond_hands_profits['GOOGL']:,.2f}", "showarrow": False}]}]),
                 dict(label="Meta", method="update", 
                      args=[{"x": [stock_data_dict['META'].index], 
                             "y": [stock_data_dict['META']['Close']]}, 
-                           {"annotations": [{"text": f"AI Model Profit: ${ai_profits['META']:,.2f}", "showarrow": False},
+                           {"title": "Meta Buy and Sell Signals",  # Dynamic title change
+                            "annotations": [{"text": f"AI Model Profit: ${ai_profits['META']:,.2f}", "showarrow": False},
                                             {"text": f"Diamond Hands Profit: ${diamond_hands_profits['META']:,.2f}", "showarrow": False}]}]),
                 dict(label="Netflix", method="update", 
                      args=[{"x": [stock_data_dict['NFLX'].index], 
                             "y": [stock_data_dict['NFLX']['Close']]}, 
-                           {"annotations": [{"text": f"AI Model Profit: ${ai_profits['NFLX']:,.2f}", "showarrow": False},
+                           {"title": "Netflix Buy and Sell Signals",  # Dynamic title change
+                            "annotations": [{"text": f"AI Model Profit: ${ai_profits['NFLX']:,.2f}", "showarrow": False},
                                             {"text": f"Diamond Hands Profit: ${diamond_hands_profits['NFLX']:,.2f}", "showarrow": False}]}]),
                 dict(label="Amazon", method="update", 
                      args=[{"x": [stock_data_dict['AMZN'].index], 
                             "y": [stock_data_dict['AMZN']['Close']]}, 
-                           {"annotations": [{"text": f"AI Model Profit: ${ai_profits['AMZN']:,.2f}", "showarrow": False},
+                           {"title": "Amazon Buy and Sell Signals",  # Dynamic title change
+                            "annotations": [{"text": f"AI Model Profit: ${ai_profits['AMZN']:,.2f}", "showarrow": False},
                                             {"text": f"Diamond Hands Profit: ${diamond_hands_profits['AMZN']:,.2f}", "showarrow": False}]}]),
                 dict(label="Tesla", method="update", 
                      args=[{"x": [stock_data_dict['TSLA'].index], 
                             "y": [stock_data_dict['TSLA']['Close']]}, 
-                           {"annotations": [{"text": f"AI Model Profit: ${ai_profits['TSLA']:,.2f}", "showarrow": False},
+                           {"title": "Tesla Buy and Sell Signals",  # Dynamic title change
+                            "annotations": [{"text": f"AI Model Profit: ${ai_profits['TSLA']:,.2f}", "showarrow": False},
                                             {"text": f"Diamond Hands Profit: ${diamond_hands_profits['TSLA']:,.2f}", "showarrow": False}]}])
             ]),
             direction="down",
