@@ -86,6 +86,9 @@ def process_stock_data(symbol, start_date='2012-01-01', end_date='2024-10-04'):
         ai_profit = calculate_ai_model_profit(data)
         diamond_hands_profit = calculate_diamond_hands_profit(data)
         
+        # Convert date index to string for JSON serialization
+        data.index = data.index.strftime('%Y-%m-%d')
+        
         return {
             'data': data,
             'ai_profit': ai_profit,
