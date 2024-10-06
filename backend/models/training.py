@@ -2,7 +2,8 @@ import yfinance as yf
 import pandas as pd
 from xgboost import XGBClassifier
 from joblib import dump, load
-import os
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import pymongo
 from bson.binary import Binary
 import pickle
@@ -10,7 +11,7 @@ import pickle
 # MongoDB setup
 def connect_to_mongo():
     # Replace <db_password> with your actual password
-    mongo_uri = "mongodb+srv://ramdhanrussell:ubPAIkHJ5IKWTdox@owltrade.eh1il.mongodb.net/stock_trading_models?retryWrites=true&w=majority&appName=OwlTrade"
+    mongo_uri = "mongodb+srv://ramdhanrussell:ubPAIkHJ5IKWTdox@owltrade.eh1il.mongodb.net/"
     client = pymongo.MongoClient(mongo_uri)
     db = client['stock_trading_models']  # Database name
     return db
@@ -24,48 +25,20 @@ def fetch_data(symbol, start_date, end_date):
 def prepare_all_features(data):
     data['SMA50'] = data['Close'].rolling(window=50).mean()
     data['SMA200'] = data['Close'].rolling(window=200).mean()
-    data['EMA50'] = data['Close'].ewm(span=50, adjust=False).mean()
-    data['EMA200'] = data['Close'].ewm(span=200, adjust=False).mean()
-    delta = data['Close'].diff(1)
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(window=14).mean()
-    avg_loss = loss.rolling(window=14).mean()
-    rs = avg_gain / avg_loss
-    data['RSI'] = 100 - (100 / (1 + rs))
-    data['EMA12'] = data['Close'].ewm(span=12, adjust=False).mean()
-    data['EMA26'] = data['Close'].ewm(span=26, adjust=False).mean()
-    data['MACD'] = data['EMA12'] - data['EMA26']
+    data['RSI'] = 100 - (100 / (1 + (data['Close'].diff(1).clip(lower=0).rolling(window=14).mean() /
+                                     (-data['Close'].diff(1).clip(upper=0).rolling(window=14).mean()))))
+    data['MACD'] = data['Close'].ewm(span=12, adjust=False).mean() - data['Close'].ewm(span=26, adjust=False).mean()
     data['Signal Line'] = data['MACD'].ewm(span=9, adjust=False).mean()
-    data['Middle Band'] = data['Close'].rolling(window=20).mean()
-    data['Upper Band'] = data['Middle Band'] + 2 * data['Close'].rolling(window=20).std()
-    data['Lower Band'] = data['Middle Band'] - 2 * data['Close'].rolling(window=20).std()
-    data['High-Low'] = data['High'] - data['Low']
-    data['High-Close'] = abs(data['High'] - data['Close'].shift(1))
-    data['Low-Close'] = abs(data['Low'] - data['Close'].shift(1))
-    data['True Range'] = data[['High-Low', 'High-Close', 'Low-Close']].max(axis=1)
-    data['ATR'] = data['True Range'].rolling(window=14).mean()
-    data['Momentum'] = data['Close'] - data['Close'].shift(10)
-    data['Lowest Low'] = data['Low'].rolling(window=14).min()
-    data['Highest High'] = data['High'].rolling(window=14).max()
-    data['Stochastic Oscillator'] = 100 * (data['Close'] - data['Lowest Low']) / (data['Highest High'] - data['Lowest Low'])
-    data['Williams %R'] = (data['Highest High'] - data['Close']) / (data['Highest High'] - data['Lowest Low']) * -100
-    data['Direction'] = (data['Close'] > data['Close'].shift(1)).astype(int)
-    data['OBV'] = (data['Volume'] * data['Direction']).cumsum()
-    data['ROC'] = ((data['Close'] - data['Close'].shift(12)) / data['Close'].shift(12)) * 100
-    data['Volatility'] = data['Close'].rolling(window=21).std()
-
-    # Example Buy Signal: You need to define how 'Buy Signal' is determined
     data['Buy Signal'] = ((data['RSI'] < 30) & (data['MACD'] > data['Signal Line'])).astype(int)
-
-    # Drop rows with any NaN values resulting from feature calculations
     data.dropna(inplace=True)
 
+# Train model using XGBoost
 def train_model(data, features):
     X = data[features]
     y = data['Buy Signal']
-
-    # Initialize XGBoost classifier
+    
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    
     model = XGBClassifier(
         n_estimators=100,
         learning_rate=0.1,
@@ -75,62 +48,58 @@ def train_model(data, features):
         use_label_encoder=False,
         eval_metric='logloss'
     )
+    model.fit(X_train, y_train)
+    
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred)
+    recall = recall_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+    
+    return model, accuracy, precision, recall, f1
 
-    # Fit the model
-    model.fit(X, y)
-    return model
-
-# Save the model to MongoDB
-def save_model_to_mongo(symbol, label, model, db):
+# Save the model and performance metrics to MongoDB
+def save_model_to_mongo(symbol, label, model, accuracy, precision, recall, f1, db):
     model_data = pickle.dumps(model)
     binary_model = Binary(model_data)
     
-    # Insert model into MongoDB
     db.models.insert_one({
         'symbol': symbol,
         'label': label,
-        'model': binary_model,
-        'features': ['SMA50', 'SMA200', 'EMA50', 'EMA200', 'RSI', 'MACD', 'Signal Line', 
-                     'Middle Band', 'Upper Band', 'Lower Band', 'ATR', 'Momentum', 
-                     'Stochastic Oscillator', 'Williams %R', 'OBV', 'ROC', 'Volatility']
+        'model': binary_model,  # Store binary model data
+        'version': 1,
+        'date_saved': pd.Timestamp.now(),
+        'performance': {
+            'accuracy': accuracy,
+            'precision': precision,
+            'recall': recall,
+            'f1_score': f1
+        }
     })
-    print(f"Model for {symbol} ({label}) saved to MongoDB.")
+    print(f"Model for {symbol} ({label}) saved to MongoDB with performance metrics.")
 
-# Create models and store them in MongoDB for multiple stocks
+# Train models and save to MongoDB
 def create_predefined_models(symbols):
-    db = connect_to_mongo()  # Connect to MongoDB
-
+    db = connect_to_mongo()
+    
     for symbol in symbols:
         print(f"Processing {symbol}...")
         full_data = fetch_data(symbol, start_date='2012-01-01', end_date='2024-10-04')
         prepare_all_features(full_data)
         
-        # Define the periods and train models
         periods = [('6m', 6), ('1y', 12), ('7y_part1', 84), ('7y_part2', 168), ('full', None)]
-        features = [
-            'SMA50', 'SMA200', 'EMA50', 'EMA200', 'RSI', 'MACD', 'Signal Line',
-            'Middle Band', 'Upper Band', 'Lower Band', 'ATR', 'Momentum',
-            'Stochastic Oscillator', 'Williams %R', 'OBV', 'ROC', 'Volatility'
-        ]
+        features = ['SMA50', 'SMA200', 'RSI', 'MACD', 'Signal Line']
         
         for label, months in periods:
-            if months:
-                period_data = full_data.tail(months * 21)  # Approx 21 trading days per month
-            else:
-                period_data = full_data
+            period_data = full_data.tail(months * 21) if months else full_data
             
-            # Check if there is enough data
-            if period_data.shape[0] < 50:  # Example threshold
-                print(f"Not enough data for period {label} for {symbol}. Skipping...")
+            if period_data.shape[0] < 50:
+                print(f"Not enough data for {label} period of {symbol}. Skipping...")
                 continue
-
-            # Train model using all features
-            model = train_model(period_data, features)
             
-            # Save the model to MongoDB
-            save_model_to_mongo(symbol, label, model, db)
+            model, accuracy, precision, recall, f1 = train_model(period_data, features)
+            save_model_to_mongo(symbol, label, model, accuracy, precision, recall, f1, db)
 
-# Example usage: Create models for multiple stocks and store them in MongoDB
 if __name__ == "__main__":
-    symbols = ['SPY', 'AAPL', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NFLX']  # List of stock symbols
+    symbols = ['SPY', 'AAPL', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NFLX']
     create_predefined_models(symbols)
