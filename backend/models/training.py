@@ -10,7 +10,6 @@ import pickle
 
 # MongoDB setup
 def connect_to_mongo():
-    # Replace <db_password> with your actual password
     mongo_uri = "mongodb+srv://ramdhanrussell:ubPAIkHJ5IKWTdox@owltrade.eh1il.mongodb.net/"
     client = pymongo.MongoClient(mongo_uri)
     db = client['stock_trading_models']  # Database name
@@ -61,12 +60,11 @@ def train_model(data, features):
 # Save the model and performance metrics to MongoDB
 def save_model_to_mongo(symbol, label, model, accuracy, precision, recall, f1, db):
     model_data = pickle.dumps(model)
-    binary_model = Binary(model_data)
     
     db.models.insert_one({
         'symbol': symbol,
         'label': label,
-        'model': binary_model,  # Store binary model data
+        'model': model_data,  # Storing serialized model data
         'version': 1,
         'date_saved': pd.Timestamp.now(),
         'performance': {

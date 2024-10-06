@@ -1,51 +1,51 @@
-/* global use, db */
 // MongoDB Playground
 
-// Use the appropriate database
-use('stock_trading_models');
+// Define the database and collection
+const db = connect('mongodb+srv://ramdhanrussell:ubPAIkHJ5IKWTdox@owltrade.eh1il.mongodb.net/');
 
-// Insert a model without preset performance metrics.
-// This would normally be handled by your backend or training process after training completes.
-db.getCollection('models').insertOne({
-    "symbol": "AAPL",  // Stock symbol
-    "label": "6m",  // Model label (e.g., 6 months data, full history)
-    "training_start_date": new Date('2023-04-01'),  // Start of training period
-    "training_end_date": new Date('2023-10-01'),  // End of training period
-    "model_hyperparameters": {  // Store hyperparameters used for training
-        "n_estimators": 100,
-        "learning_rate": 0.1,
-        "max_depth": 5,
-        "subsample": 0.8,
-        "colsample_bytree": 0.8
+// Use the stock_trading_models database
+const database = db.getSiblingDB('stock_trading_models');
+
+// Create a sample model document to be inserted
+const modelData = {
+    symbol: "AAPL",                   // Stock symbol
+    label: "7y_part1",                // Model label, e.g., 6m, 1y, 7y_part1, etc.
+    parameters: {                     // XGBoost model parameters used for training
+        n_estimators: 100,
+        learning_rate: 0.1,
+        max_depth: 5,
+        subsample: 0.8,
+        colsample_bytree: 0.8,
+        eval_metric: 'logloss'
     },
-    "model": Binary(binaryModelData),  // Store the binary model file
-    "version": 1,  // Model versioning for retraining purposes
-    "date_saved": new Date()  // Timestamp of when the model was saved
-});
+    features: [                       // Features used in the model
+        'SMA50', 
+        'SMA200', 
+        'RSI', 
+        'MACD', 
+        'Signal Line'
+    ],
+    performance: {                    // Model performance metrics
+        accuracy: 0.75,               // Example accuracy
+        precision: 0.72,              // Example precision
+        recall: 0.68,                 // Example recall
+        f1_score: 0.7                 // Example F1-score
+    },
+    version: 1,                       // Model version (you can increment this for new versions)
+    date_saved: new Date(),           // Timestamp of model saving
+    additional_info: {                // Optional: Any other relevant info
+        train_test_split: 0.2,        // Train-test split ratio
+        time_period: "7 years",       // Time period used for training (based on stock data)
+        data_points: 1470             // Number of data points (rows) used for training
+    },
+    model_binary: Binary(pickle.dumps("dummy_model_data")) // This would be the actual binary of the trained model
+};
 
-// Fetch all models stored for any stock symbol (e.g., SPY)
-const modelsForSPY = db.getCollection('models').find({
-    symbol: "SPY"
-}).toArray();
-console.log("Models for SPY:", modelsForSPY);
+// Insert the model document into the models collection
+database.models.insertOne(modelData);
 
-// Fetch performance metrics for the most recent model for SPY
-// These metrics would be dynamically updated after model evaluation in your backend or training process.
-const recentModelPerformance = db.getCollection('models').find({
-    symbol: "SPY"
-}).sort({ date_saved: -1 }).limit(1).toArray();
-console.log("Most recent model performance for SPY:", recentModelPerformance);
-
-// Calculate average accuracy across all models for SPY
-// Performance metrics should already be saved dynamically during model evaluation.
-db.getCollection('models').aggregate([
-    { $match: { symbol: "SPY" } },
-    { $group: { _id: "$symbol", avg_accuracy: { $avg: "$performance.accuracy" } } }
-]).toArray();
-
-// Fetch predictions for a specific time range and stock symbol (e.g., SPY)
-const recentPredictions = db.getCollection('predictions').find({
-    symbol: "SPY",
-    date: { $gte: new Date('2023-10-01'), $lt: new Date('2023-11-01') }
-}).toArray();
-console.log("Recent predictions for SPY:", recentPredictions);
+// Query the models collection to verify the insert
+database.models.find({
+    symbol: "AAPL",
+    label: "7y_part1"
+}).pretty();
