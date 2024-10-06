@@ -1,0 +1,74 @@
+import yfinance as yf
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from joblib import dump
+
+# Fetch stock data
+def fetch_data(symbol, start_date, end_date):
+    data = yf.download(symbol, start=start_date, end=end_date, interval='1d')
+    return data
+
+# Feature calculations
+def prepare_all_features(data):
+    data['SMA50'] = data['Close'].rolling(window=50).mean()
+    data['SMA200'] = data['Close'].rolling(window=200).mean()
+    data['EMA50'] = data['Close'].ewm(span=50, adjust=False).mean()
+    data['EMA200'] = data['Close'].ewm(span=200, adjust=False).mean()
+    delta = data['Close'].diff(1)
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(window=14).mean()
+    avg_loss = loss.rolling(window=14).mean()
+    rs = avg_gain / avg_loss
+    data['RSI'] = 100 - (100 / (1 + rs))
+    data['EMA12'] = data['Close'].ewm(span=12, adjust=False).mean()
+    data['EMA26'] = data['Close'].ewm(span=26, adjust=False).mean()
+    data['MACD'] = data['EMA12'] - data['EMA26']
+    data['Signal Line'] = data['MACD'].ewm(span=9, adjust=False).mean()
+    data['Middle Band'] = data['Close'].rolling(window=20).mean()
+    data['Upper Band'] = data['Middle Band'] + 2 * data['Close'].rolling(window=20).std()
+    data['Lower Band'] = data['Middle Band'] - 2 * data['Close'].rolling(window=20).std()
+    data['High-Low'] = data['High'] - data['Low']
+    data['High-Close'] = abs(data['High'] - data['Close'].shift(1))
+    data['Low-Close'] = abs(data['Low'] - data['Close'].shift(1))
+    data['True Range'] = data[['High-Low', 'High-Close', 'Low-Close']].max(axis=1)
+    data['ATR'] = data['True Range'].rolling(window=14).mean()
+    data['Momentum'] = data['Close'] - data['Close'].shift(10)
+    data['Lowest Low'] = data['Low'].rolling(window=14).min()
+    data['Highest High'] = data['High'].rolling(window=14).max()
+    data['Stochastic Oscillator'] = 100 * (data['Close'] - data['Lowest Low']) / (data['Highest High'] - data['Lowest Low'])
+    data['Williams %R'] = (data['Highest High'] - data['Close']) / (data['Highest High'] - data['Lowest Low']) * -100
+    data['Direction'] = (data['Close'] > data['Close'].shift(1)).astype(int)
+    data['OBV'] = data['Volume'] * data['Direction'].cumsum()
+    data['ROC'] = ((data['Close'] - data['Close'].shift(12)) / data['Close'].shift(12)) * 100
+    data['Volatility'] = data['Close'].rolling(window=21).std()
+
+def train_model(data, features, save_path):
+    X = data[features].dropna()
+    y = data['Buy Signal']  # Assuming this is the target
+    model = RandomForestClassifier(n_estimators=100)
+    model.fit(X, y)
+    dump(model, save_path)
+
+def create_predefined_models(symbol):
+    full_data = fetch_data(symbol, start_date='2012-01-01', end_date='2024-10-04')
+    prepare_all_features(full_data)
+    
+    # Train models for different time intervals using all features
+    periods = [('6m', 6), ('1y', 12), ('7y_part1', 84), ('7y_part2', 168), ('full', None)]
+    features = ['SMA50', 'SMA200', 'EMA50', 'EMA200', 'RSI', 'MACD', 'Signal Line', 'Middle Band', 
+                'Upper Band', 'Lower Band', 'ATR', 'Momentum', 'Stochastic Oscillator', 'Williams %R',
+                'OBV', 'ROC', 'Volatility']
+    
+    for label, months in periods:
+        if months:
+            period_data = full_data[-months*21:]  # Approx 21 trading days per month
+        else:
+            period_data = full_data
+            
+        # Train model using all features
+        train_model(period_data, features, f'models/{symbol}_{label}_all_features_model.joblib')
+
+# Example usage: Create models for SPY with all features
+if __name__ == "__main__":
+    create_predefined_models('SPY')

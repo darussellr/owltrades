@@ -1,0 +1,39 @@
+import streamlit as st
+from joblib import dump
+from sklearn.ensemble import RandomForestClassifier
+
+# Predefined features
+FEATURE_LIST = [
+    'SMA50', 'SMA200', 'EMA50', 'EMA200', 'RSI', 'MACD', 'Signal Line',
+    'Middle Band', 'Upper Band', 'Lower Band', 'ATR', 'Momentum',
+    'Stochastic Oscillator', 'Williams %R', 'OBV', 'ROC', 'Volatility'
+]
+
+# Function to train a model with selected features
+def train_custom_model(data, selected_features):
+    X = data[selected_features].dropna()
+    y = data['Buy Signal']  # Target label
+    model = RandomForestClassifier(n_estimators=100)
+    model.fit(X, y)
+    return model
+
+# Streamlit UI
+st.title("Stock Trading Model Generator")
+st.write("Select the features you want to include in the model:")
+
+# Checkboxes for selecting features
+selected_features = []
+for feature in FEATURE_LIST:
+    if st.checkbox(feature):
+        selected_features.append(feature)
+
+# Submit button to trigger model training
+if st.button('Train Model'):
+    if selected_features:
+        # Assuming full_data is already prepared with all features
+        model = train_custom_model(full_data, selected_features)
+        model_save_path = f'models/custom_model_{"_".join(selected_features)}.joblib'
+        dump(model, model_save_path)
+        st.success(f"Model trained and saved as: {model_save_path}")
+    else:
+        st.error("Please select at least one feature.")
