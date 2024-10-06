@@ -9,8 +9,8 @@ import pickle
 
 # MongoDB setup
 def connect_to_mongo():
-    # Replace with your MongoDB Atlas connection string
-    mongo_uri = "your_mongo_atlas_connection_string"
+    # Replace <db_password> with your actual password
+    mongo_uri = "mongodb+srv://ramdhanrussell:ubPAIkHJ5IKWTdox@owltrade.eh1il.mongodb.net/stock_trading_models?retryWrites=true&w=majority&appName=OwlTrade"
     client = pymongo.MongoClient(mongo_uri)
     db = client['stock_trading_models']  # Database name
     return db
